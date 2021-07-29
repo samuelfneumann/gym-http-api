@@ -1,4 +1,5 @@
-**Status:** Archive (code is provided as-is, no updates expected)
+# To Do:
+- [ ] For some reason, the flask app always gets string data, not json
 
 <img align="left" src="http://i.imgur.com/568Luwb.png">gym-http-api
 ============

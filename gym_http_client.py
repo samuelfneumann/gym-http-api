@@ -14,6 +14,8 @@ class Client(object):
     def __init__(self, remote_base):
         self.remote_base = remote_base
         self.session = requests.Session()
+
+        print("JSON content type not working")
         self.session.headers.update({'Content-type': 'application/json'})
 
     def _parse_server_error_or_raise_for_status(self, resp):
@@ -33,8 +35,10 @@ class Client(object):
     def _post_request(self, route, data):
         url = urlparse.urljoin(self.remote_base, route)
         logger.info("POST {}\n{}".format(url, json.dumps(data)))
-        resp = self.session.post(urlparse.urljoin(self.remote_base, route),
-                            data=json.dumps(data))
+        url = urlparse.urljoin(self.remote_base, route)
+        resp = self.session.post(url, json=data)
+        #resp = requests.post(urlparse.urljoin(self.remote_base, route),
+        #                    json=data)
         return self._parse_server_error_or_raise_for_status(resp)
 
     def _get_request(self, route):
@@ -42,10 +46,11 @@ class Client(object):
         logger.info("GET {}".format(url))
         resp = self.session.get(url)
         return self._parse_server_error_or_raise_for_status(resp)
-        
+
     def env_create(self, env_id):
         route = '/v1/envs/'
         data = {'env_id': env_id}
+        print("===", data)
         resp = self._post_request(route, data)
         instance_id = resp['instance_id']
         return instance_id
@@ -119,16 +124,6 @@ class Client(object):
         route = '/v1/envs/{}/close/'.format(instance_id)
         self._post_request(route, None)
 
-    def upload(self, training_dir, algorithm_id=None, api_key=None):
-        if not api_key:
-            api_key = os.environ.get('OPENAI_GYM_API_KEY')
-
-        route = '/v1/upload/'
-        data = {'training_dir': training_dir,
-                'algorithm_id': algorithm_id,
-                'api_key': api_key}
-        self._post_request(route, data)
-
     def shutdown_server(self):
         route = '/v1/shutdown/'
         self._post_request(route, None)
@@ -145,7 +140,7 @@ if __name__ == '__main__':
     client = Client(remote_base)
 
     # Create environment
-    env_id = 'CartPole-v0'
+    env_id = 'MountainCar-v0'
     instance_id = client.env_create(env_id)
 
     # Check properties
@@ -155,7 +150,10 @@ if __name__ == '__main__':
 
     # Run a single step
     client.env_monitor_start(instance_id, directory='tmp', force=True)
-    init_obs = client.env_reset(instance_id)
-    [observation, reward, done, info] = client.env_step(instance_id, 1, True)
+    observation, done = client.env_reset(instance_id), False
+    while not done:
+        action = 0 if observation[1] < 0 else 2
+        print(observation)
+        observation, reward, done, info = client.env_step(instance_id, action, True)
     client.env_monitor_close(instance_id)
-    client.upload(training_dir='tmp')
+    client.env_close(instance_id)

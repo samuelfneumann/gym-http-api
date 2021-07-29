@@ -59,6 +59,8 @@ class Envs(object):
     def reset(self, instance_id):
         env = self._lookup_env(instance_id)
         obs = env.reset()
+        if isinstance(obs, tuple):
+            obs = [obs]
         return env.observation_space.to_jsonable(obs)
 
     def step(self, instance_id, action, render):
@@ -70,6 +72,8 @@ class Envs(object):
         if render:
             env.render()
         [observation, reward, done, info] = env.step(nice_action)
+        if isinstance(observation, tuple):
+            observation = [observation]
         obs_jsonable = env.observation_space.to_jsonable(observation)
         return [obs_jsonable, reward, done, info]
 
@@ -117,8 +121,8 @@ class Envs(object):
             # Many newer JSON parsers allow it, but many don't. Notably python json
             # module can read and write such floats. So we only here fix "export version",
             # also make it flat.
-            info['low']  = [(x if x != -np.inf else -1e100) for x in np.array(space.low ).flatten()]
-            info['high'] = [(x if x != +np.inf else +1e100) for x in np.array(space.high).flatten()]
+            info['low']  = [(float(x) if x != -np.inf else -1e100) for x in np.array(space.low ).flatten()]
+            info['high'] = [(float(x) if x != +np.inf else +1e100) for x in np.array(space.high).flatten()]
         elif info['name'] == 'HighLow':
             info['num_rows'] = space.num_rows
             info['matrix'] = [((float(x) if x != -np.inf else -1e100) if x != +np.inf else +1e100) for x in np.array(space.matrix).flatten()]
@@ -130,7 +134,7 @@ class Envs(object):
             v_c = lambda count: False
         else:
             v_c = lambda count: count % video_callable == 0
-        self.envs[instance_id] = gym.wrappers.Monitor(env, directory, force=force, resume=resume, video_callable=v_c) 
+        self.envs[instance_id] = gym.wrappers.Monitor(env, directory, force=force, resume=resume, video_callable=v_c)
 
     def monitor_close(self, instance_id):
         env = self._lookup_env(instance_id)
@@ -141,10 +145,14 @@ class Envs(object):
         env.close()
         self._remove_env(instance_id)
 
+
 ########## App setup ##########
 app = Flask(__name__)
+app.config['JSONIFY_MIMETYPE'] = 'application/json'
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
 envs = Envs()
+
+
 ########## Error handling ##########
 class InvalidUsage(Exception):
     status_code = 400
@@ -160,31 +168,12 @@ class InvalidUsage(Exception):
         rv['message'] = self.message
         return rv
 
-def get_required_param(json, param):
-    if json is None:
-        logger.info("Request is not a valid json")
-        raise InvalidUsage("Request is not a valid json")
-    value = json.get(param, None)
-    if (value is None) or (value=='') or (value==[]):
-        logger.info("A required request parameter '{}' had value {}".format(param, value))
-        raise InvalidUsage("A required request parameter '{}' was not provided".format(param))
-    return value
-
-def get_optional_param(json, param, default):
-    if json is None:
-        logger.info("Request is not a valid json")
-        raise InvalidUsage("Request is not a valid json")
-    value = json.get(param, None)
-    if (value is None) or (value=='') or (value==[]):
-        logger.info("An optional request parameter '{}' had value {} and was replaced with default value {}".format(param, value, default))
-        value = default
-    return value
-
 @app.errorhandler(InvalidUsage)
 def handle_invalid_usage(error):
     response = jsonify(error.to_dict())
     response.status_code = error.status_code
     return response
+
 
 ########## API route definitions ##########
 @app.route('/v1/envs/', methods=['POST'])
@@ -200,11 +189,16 @@ def env_create():
         for the created environment instance. The instance_id is
         used in future API calls to identify the environment to be
         manipulated
+
     """
-    env_id = get_required_param(request.get_json(), 'env_id')
-    seed = get_optional_param(request.get_json(), 'seed', None)
+    print("CREATE:", type(request.content_type))
+    j = json.loads(request.data)
+    print(j)
+    env_id = get_required_param(j, 'env_id')
+    seed = get_optional_param(j, 'seed', None)
     instance_id = envs.create(env_id, seed)
     return jsonify(instance_id = instance_id)
+
 
 @app.route('/v1/envs/', methods=['GET'])
 def env_list_all():
@@ -219,54 +213,12 @@ def env_list_all():
     all_envs = envs.list_all()
     return jsonify(all_envs = all_envs)
 
-@app.route('/v1/envs/<instance_id>/reset/', methods=['POST'])
-def env_reset(instance_id):
-    """
-    Reset the state of the environment and return an initial
-    observation.
-
-    Parameters:
-        - instance_id: a short identifier (such as '3c657dbc')
-        for the environment instance
-    Returns:
-        - observation: the initial observation of the space
-    """
-    observation = envs.reset(instance_id)
-    if np.isscalar(observation):
-        observation = observation.item()
-    elif np.isarray(observation):
-	observation = observation.tolist()
-    return jsonify(observation = observation)
-
-@app.route('/v1/envs/<instance_id>/step/', methods=['POST'])
-def env_step(instance_id):
-    """
-    Run one timestep of the environment's dynamics.
-
-    Parameters:
-        - instance_id: a short identifier (such as '3c657dbc')
-        for the environment instance
-        - action: an action to take in the environment
-    Returns:
-        - observation: agent's observation of the current
-        environment
-        - reward: amount of reward returned after previous action
-        - done: whether the episode has ended
-        - info: a dict containing auxiliary diagnostic information
-    """
-    json = request.get_json()
-    action = get_required_param(json, 'action')
-    render = get_optional_param(json, 'render', False)
-    [obs_jsonable, reward, done, info] = envs.step(instance_id, action, render)
-    return jsonify(observation = obs_jsonable,
-                    reward = reward, done = done, info = info)
 
 @app.route('/v1/envs/<instance_id>/action_space/', methods=['GET'])
 def env_action_space_info(instance_id):
     """
     Get information (name and dimensions/bounds) of the env's
     action_space
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
         for the environment instance
@@ -278,42 +230,42 @@ def env_action_space_info(instance_id):
     info = envs.get_action_space_info(instance_id)
     return jsonify(info = info)
 
+
 @app.route('/v1/envs/<instance_id>/action_space/sample', methods=['GET'])
 def env_action_space_sample(instance_id):
     """
     Get a sample from the env's action_space
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
         for the environment instance
     Returns:
-
     	- action: a randomly sampled element belonging to the action_space
-    """  
+    """
     action = envs.get_action_space_sample(instance_id)
     return jsonify(action = action)
+
 
 @app.route('/v1/envs/<instance_id>/action_space/contains/<x>', methods=['GET'])
 def env_action_space_contains(instance_id, x):
     """
     Assess that value is a member of the env's action_space
-    
+
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
         for the environment instance
 	    - x: the value to be checked as member
     Returns:
         - member: whether the value passed as parameter belongs to the action_space
-    """  
+    """
 
     member = envs.get_action_space_contains(instance_id, x)
     return jsonify(member = member)
+
 
 @app.route('/v1/envs/<instance_id>/observation_space/contains', methods=['POST'])
 def env_observation_space_contains(instance_id):
     """
     Assess that the parameters are members of the env's observation_space
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
         for the environment instance
@@ -324,12 +276,12 @@ def env_observation_space_contains(instance_id):
     member = envs.get_observation_space_contains(instance_id, j)
     return jsonify(member = member)
 
+
 @app.route('/v1/envs/<instance_id>/observation_space/', methods=['GET'])
 def env_observation_space_info(instance_id):
     """
     Get information (name and dimensions/bounds) of the env's
     observation_space
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
         for the environment instance
@@ -339,13 +291,14 @@ def env_observation_space_info(instance_id):
         varies from space to space
     """
     info = envs.get_observation_space_info(instance_id)
+    print(type(info["low"][0]))
     return jsonify(info = info)
+
 
 @app.route('/v1/envs/<instance_id>/monitor/start/', methods=['POST'])
 def env_monitor_start(instance_id):
     """
     Start monitoring.
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
         for the environment instance
@@ -356,7 +309,7 @@ def env_monitor_start(instance_id):
         already in this directory, which will be merged with
         our new data
     """
-    j = request.get_json()
+    j = json.loads(request.data)
 
     directory = get_required_param(j, 'directory')
     force = get_optional_param(j, 'force', False)
@@ -365,11 +318,11 @@ def env_monitor_start(instance_id):
     envs.monitor_start(instance_id, directory, force, resume, video_callable)
     return ('', 204)
 
+
 @app.route('/v1/envs/<instance_id>/monitor/close/', methods=['POST'])
 def env_monitor_close(instance_id):
     """
     Flush all monitor data to disk.
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
           for the environment instance
@@ -377,11 +330,28 @@ def env_monitor_close(instance_id):
     envs.monitor_close(instance_id)
     return ('', 204)
 
+
+@app.route('/v1/envs/<instance_id>/reset/', methods=['POST'])
+def env_reset(instance_id):
+    """
+    Reset the state of the environment and return an initial
+    observation.
+    Parameters:
+        - instance_id: a short identifier (such as '3c657dbc')
+        for the environment instance
+    Returns:
+        - observation: the initial observation of the space
+    """
+    observation = envs.reset(instance_id)
+    if np.isscalar(observation):
+        observation = observation.item()
+    return jsonify(observation = observation)
+
+
 @app.route('/v1/envs/<instance_id>/close/', methods=['POST'])
 def env_close(instance_id):
     """
     Manually close an environment
-
     Parameters:
         - instance_id: a short identifier (such as '3c657dbc')
           for the environment instance
@@ -389,31 +359,6 @@ def env_close(instance_id):
     envs.env_close(instance_id)
     return ('', 204)
 
-@app.route('/v1/upload/', methods=['POST'])
-def upload():
-    """
-    Upload the results of training (as automatically recorded by
-    your env's monitor) to OpenAI Gym.
-
-    Parameters:
-        - training_dir: A directory containing the results of a
-        training run.
-        - api_key: Your OpenAI API key
-        - algorithm_id (default=None): An arbitrary string
-        indicating the paricular version of the algorithm
-        (including choices of parameters) you are running.
-        """
-    j = request.get_json()
-    training_dir = get_required_param(j, 'training_dir')
-    api_key      = get_required_param(j, 'api_key')
-    algorithm_id = get_optional_param(j, 'algorithm_id', None)
-
-    try:
-        gym.upload(training_dir, algorithm_id, writeup=None, api_key=api_key,
-                   ignore_open_monitors=False)
-        return ('', 204)
-    except gym.error.AuthenticationError:
-        raise InvalidUsage('You must provide an OpenAI Gym API key')
 
 @app.route('/v1/shutdown/', methods=['POST'])
 def shutdown():
@@ -421,6 +366,53 @@ def shutdown():
     f = request.environ.get('werkzeug.server.shutdown')
     f()
     return 'Server shutting down'
+
+
+@app.route('/v1/envs/<instance_id>/step/', methods=['POST'])
+def env_step(instance_id):
+    """
+    Run one timestep of the environment's dynamics.
+    Parameters:
+        - instance_id: a short identifier (such as '3c657dbc')
+        for the environment instance
+        - action: an action to take in the environment
+    Returns:
+        - observation: agent's observation of the current
+        environment
+        - reward: amount of reward returned after previous action
+        - done: whether the episode has ended
+        - info: a dict containing auxiliary diagnostic information
+    """
+    j = json.loads(request.data)
+    action = get_required_param(j, 'action')
+    render = get_optional_param(j, 'render', False)
+    [obs_jsonable, reward, done, info] = envs.step(instance_id, action, render)
+    return jsonify(observation = obs_jsonable,
+                    reward = reward, done = done, info = info)
+
+
+def get_required_param(json, param):
+    if json is None:
+        logger.info("Request is not a valid json")
+        raise InvalidUsage("Request is not a valid json")
+    value = json.get(param, None)
+    if (value is None) or (value=='') or (value==[]):
+        logger.info("A required request parameter '{}' had value {}".format(param, value))
+        raise InvalidUsage("A required request parameter '{}' was not provided".format(param))
+    return value
+
+
+def get_optional_param(json, param, default):
+    if json is None:
+        logger.info("Request is not a valid json")
+        raise InvalidUsage("Request is not a valid json")
+    print("OPTIONAL:", json)
+    value = json.get(param, None)
+    if (value is None) or (value=='') or (value==[]):
+        logger.info("An optional request parameter '{}' had value {} and was replaced with default value {}".format(param, value, default))
+        value = default
+    return value
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Start a Gym HTTP API server')
@@ -430,3 +422,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print('Server starting at: ' + 'http://{}:{}'.format(args.listen, args.port))
     app.run(host=args.listen, port=args.port)
+
