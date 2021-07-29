@@ -191,9 +191,7 @@ def env_create():
         manipulated
 
     """
-    print("CREATE:", type(request.content_type))
-    j = json.loads(request.data)
-    print(j)
+    j = json.loads(request.get_json())
     env_id = get_required_param(j, 'env_id')
     seed = get_optional_param(j, 'seed', None)
     instance_id = envs.create(env_id, seed)
@@ -291,7 +289,6 @@ def env_observation_space_info(instance_id):
         varies from space to space
     """
     info = envs.get_observation_space_info(instance_id)
-    print(type(info["low"][0]))
     return jsonify(info = info)
 
 
@@ -309,7 +306,7 @@ def env_monitor_start(instance_id):
         already in this directory, which will be merged with
         our new data
     """
-    j = json.loads(request.data)
+    j = json.loads(request.get_data())
 
     directory = get_required_param(j, 'directory')
     force = get_optional_param(j, 'force', False)
@@ -383,7 +380,7 @@ def env_step(instance_id):
         - done: whether the episode has ended
         - info: a dict containing auxiliary diagnostic information
     """
-    j = json.loads(request.data)
+    j = json.loads(request.get_data())
     action = get_required_param(j, 'action')
     render = get_optional_param(j, 'render', False)
     [obs_jsonable, reward, done, info] = envs.step(instance_id, action, render)
@@ -406,7 +403,6 @@ def get_optional_param(json, param, default):
     if json is None:
         logger.info("Request is not a valid json")
         raise InvalidUsage("Request is not a valid json")
-    print("OPTIONAL:", json)
     value = json.get(param, None)
     if (value is None) or (value=='') or (value==[]):
         logger.info("An optional request parameter '{}' had value {} and was replaced with default value {}".format(param, value, default))
@@ -415,11 +411,15 @@ def get_optional_param(json, param, default):
 
 
 if __name__ == '__main__':
+    print("=== Gym HTTP API ===")
+    print("warning: JSON data not currently accepted by app, decoding response string data as JSON\n")
     parser = argparse.ArgumentParser(description='Start a Gym HTTP API server')
     parser.add_argument('-l', '--listen', help='interface to listen to', default='127.0.0.1')
     parser.add_argument('-p', '--port', default=5000, type=int, help='port to bind to')
+    parser.add_argument('-n', '--processes', default=1, type=int, help='maximum number of processes used to handle concurrent requests')
 
     args = parser.parse_args()
     print('Server starting at: ' + 'http://{}:{}'.format(args.listen, args.port))
+
     app.run(host=args.listen, port=args.port)
 

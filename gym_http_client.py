@@ -15,7 +15,7 @@ class Client(object):
         self.remote_base = remote_base
         self.session = requests.Session()
 
-        print("JSON content type not working")
+        print("Warning: JSON content type not working")
         self.session.headers.update({'Content-type': 'application/json'})
 
     def _parse_server_error_or_raise_for_status(self, resp):
@@ -128,6 +128,7 @@ class Client(object):
         route = '/v1/shutdown/'
         self._post_request(route, None)
 
+
 class ServerError(Exception):
     def __init__(self, message, status_code=None):
         Exception.__init__(self)
@@ -153,7 +154,6 @@ if __name__ == '__main__':
     observation, done = client.env_reset(instance_id), False
     while not done:
         action = 0 if observation[1] < 0 else 2
-        print(observation)
         observation, reward, done, info = client.env_step(instance_id, action, True)
     client.env_monitor_close(instance_id)
     client.env_close(instance_id)
