@@ -234,6 +234,8 @@ def env_reset(instance_id):
     observation = envs.reset(instance_id)
     if np.isscalar(observation):
         observation = observation.item()
+    elif np.isarray(observation):
+	observation = observation.tolist()
     return jsonify(observation = observation)
 
 @app.route('/v1/envs/<instance_id>/step/', methods=['POST'])
