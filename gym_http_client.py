@@ -15,7 +15,7 @@ class Client(object):
         self.remote_base = remote_base
         self.session = requests.Session()
 
-        print("Warning: JSON content type not working")
+        print("Warning: JSON content type currently unsupported")
         self.session.headers.update({'Content-type': 'application/json'})
 
     def _parse_server_error_or_raise_for_status(self, resp):

@@ -191,7 +191,7 @@ def env_create():
         manipulated
 
     """
-    j = json.loads(request.get_json())
+    j = json.loads(request.get_data())
     env_id = get_required_param(j, 'env_id')
     seed = get_optional_param(j, 'seed', None)
     instance_id = envs.create(env_id, seed)
@@ -270,7 +270,7 @@ def env_observation_space_contains(instance_id):
     Returns:
         - member: whether all the values passed belong to the observation_space
     """
-    j = request.get_json()
+    j = json.loads(request.get_data())
     member = envs.get_observation_space_contains(instance_id, j)
     return jsonify(member = member)
 
